@@ -1,0 +1,23 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ---------------< com.example.keycloak:idp-login-limiter >---------------
+[INFO] Building Keycloak IdP Login Limiter Condition 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- dependency:3.7.0:tree (default-cli) @ idp-login-limiter ---
+[INFO] com.example.keycloak:idp-login-limiter:jar:1.0.0
+[INFO] +- org.keycloak:keycloak-server-spi:jar:26.5.7:provided
+[INFO] +- org.keycloak:keycloak-server-spi-private:jar:26.5.7:provided
+[INFO] |  +- org.apache.httpcomponents:httpclient:jar:4.5.14:provided
+[INFO] |  |  +- org.apache.httpcomponents:httpcore:jar:4.4.16:provided
+[INFO] |  |  \- commons-codec:commons-codec:jar:1.11:provided
+[INFO] |  \- io.opentelemetry:opentelemetry-api:jar:1.44.1:provided
+[INFO] |     \- io.opentelemetry:opentelemetry-context:jar:1.44.1:provided
+[INFO] \- org.jboss.logging:jboss-logging:jar:3.5.3.Final:provided
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  7.329 s
+[INFO] Finished at: 2026-04-09T14:18:51+03:00
+[INFO] ------------------------------------------------------------------------
