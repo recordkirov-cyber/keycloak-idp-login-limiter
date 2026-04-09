@@ -2,4 +2,6 @@ target/
 *.class
 *.log
 *.iml
+*.txt
 .idea/
+.vscode/
