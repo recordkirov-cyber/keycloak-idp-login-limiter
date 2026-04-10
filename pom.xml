@@ -1,14 +1,13 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<?xml version="1.0"?>
+
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.example.keycloak</groupId>
-    <artifactId>idp-login-limiter</artifactId>
-    <version>1.0.0</version>
-    <packaging>jar</packaging>
-    <name>Keycloak IdP Login Limiter Condition</name>
+    <groupId>org.keycloak</groupId>
+    <artifactId>keycloak-idp-login-limiter</artifactId>
+    <version>${keycloak.version}_0</version>
+    <name>Keycloak IDP Login Limiter Condition</name>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
@@ -18,6 +17,12 @@
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>org.keycloak</groupId>
+            <artifactId>keycloak-core</artifactId>
+            <version>${keycloak.version}</version>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-server-spi</artifactId>
@@ -32,15 +37,8 @@
         </dependency>
         <dependency>
             <groupId>org.keycloak</groupId>
-            <artifactId>keycloak-core</artifactId>
+            <artifactId>keycloak-services</artifactId>
             <version>${keycloak.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        <!-- JBoss Logging уже включён в Keycloak, но явно укажем для компиляции -->
-        <dependency>
-            <groupId>org.jboss.logging</groupId>
-            <artifactId>jboss-logging</artifactId>
-            <version>3.5.3.Final</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>
