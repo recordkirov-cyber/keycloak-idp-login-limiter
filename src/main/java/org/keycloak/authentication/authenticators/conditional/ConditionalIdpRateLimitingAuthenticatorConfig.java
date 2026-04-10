@@ -8,6 +8,7 @@ import java.util.Map;
 
 import static org.keycloak.authentication.authenticators.conditional.ConditionalIdpRateLimitingAuthenticatorFactory.CONF_IDP_ALIAS;
 import static org.keycloak.authentication.authenticators.conditional.ConditionalIdpRateLimitingAuthenticatorFactory.CONF_IDP_LIMIT;
+import static org.keycloak.authentication.authenticators.conditional.ConditionalIdpRateLimitingAuthenticatorFactory.CONF_RESET_INTERVAL_HOURS;
 
 class ConditionalIdpRateLimitingAuthenticatorConfig {
 
@@ -15,6 +16,7 @@ class ConditionalIdpRateLimitingAuthenticatorConfig {
 
     private int idpLimit;
     private String idpAlias;
+    private int resetIntervalHours;
 
     ConditionalIdpRateLimitingAuthenticatorConfig() {
     }
@@ -26,6 +28,7 @@ class ConditionalIdpRateLimitingAuthenticatorConfig {
     ConditionalIdpRateLimitingAuthenticatorConfig(Map<String, String> configMap) {
         this.idpLimit = parseIdpLimit(configMap);
         this.idpAlias = configMap.getOrDefault(CONF_IDP_ALIAS, "");
+        this.resetIntervalHours = parseResetIntervalHours(configMap);
     }
 
     private int parseIdpLimit(Map<String, String> configMap) {
@@ -42,6 +45,19 @@ class ConditionalIdpRateLimitingAuthenticatorConfig {
             return limit;
         } catch (NumberFormatException e) {
             throw new IllegalStateException("Invalid IDP limit value: " + idpLimitStr, e);
+        }
+    }
+
+    private int parseResetIntervalHours(Map<String, String> configMap) {
+        final String resetIntervalStr = configMap.getOrDefault(CONF_RESET_INTERVAL_HOURS, "24");
+        try {
+            final int hours = Integer.parseInt(resetIntervalStr.trim());
+            if (hours <= 0) {
+                throw new IllegalStateException("Reset interval hours must be greater than 0, but got: " + hours);
+            }
+            return hours;
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException("Invalid reset interval hours value: " + resetIntervalStr, e);
         }
     }
 
@@ -66,5 +82,16 @@ class ConditionalIdpRateLimitingAuthenticatorConfig {
 
     public boolean isGlobalLimit() {
         return idpAlias == null || idpAlias.trim().isEmpty();
+    }
+
+    public int getResetIntervalHours() {
+        return resetIntervalHours;
+    }
+
+    public void setResetIntervalHours(int resetIntervalHours) {
+        if (resetIntervalHours <= 0) {
+            throw new IllegalArgumentException("Reset interval hours must be greater than 0");
+        }
+        this.resetIntervalHours = resetIntervalHours;
     }
 }

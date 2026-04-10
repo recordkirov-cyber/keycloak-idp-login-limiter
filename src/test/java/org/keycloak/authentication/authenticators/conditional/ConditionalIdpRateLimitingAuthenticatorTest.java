@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.keycloak.authentication.authenticators.conditional.ConditionalIdpRateLimitingAuthenticatorFactory.CONF_IDP_ALIAS;
 import static org.keycloak.authentication.authenticators.conditional.ConditionalIdpRateLimitingAuthenticatorFactory.CONF_IDP_LIMIT;
+import static org.keycloak.authentication.authenticators.conditional.ConditionalIdpRateLimitingAuthenticatorFactory.CONF_RESET_INTERVAL_HOURS;
 
 class ConditionalIdpRateLimitingAuthenticatorTest {
 
@@ -26,12 +27,14 @@ class ConditionalIdpRateLimitingAuthenticatorTest {
         final Map<String, String> configMap = new HashMap<>();
         configMap.put(CONF_IDP_LIMIT, "5");
         configMap.put(CONF_IDP_ALIAS, "google");
+        configMap.put(CONF_RESET_INTERVAL_HOURS, "24");
 
         config = new ConditionalIdpRateLimitingAuthenticatorConfig(configMap);
         
         assertTrue(config.getIdpLimit() == 5);
         assertTrue(config.getIdpAlias().equals("google"));
         assertFalse(config.isGlobalLimit());
+        assertTrue(config.getResetIntervalHours() == 24);
     }
 
     @Test
@@ -39,11 +42,13 @@ class ConditionalIdpRateLimitingAuthenticatorTest {
         final Map<String, String> configMap = new HashMap<>();
         configMap.put(CONF_IDP_LIMIT, "10");
         configMap.put(CONF_IDP_ALIAS, "");
+        configMap.put(CONF_RESET_INTERVAL_HOURS, "12");
 
         config = new ConditionalIdpRateLimitingAuthenticatorConfig(configMap);
         
         assertTrue(config.isGlobalLimit());
         assertTrue(config.getIdpLimit() == 10);
+        assertTrue(config.getResetIntervalHours() == 12);
     }
 
     @Test
@@ -80,10 +85,12 @@ class ConditionalIdpRateLimitingAuthenticatorTest {
         
         config.setIdpLimit(7);
         config.setIdpAlias("github");
+        config.setResetIntervalHours(6);
 
         assertTrue(config.getIdpLimit() == 7);
         assertTrue(config.getIdpAlias().equals("github"));
         assertFalse(config.isGlobalLimit());
+        assertTrue(config.getResetIntervalHours() == 6);
 
         // Test setting to empty for global limit
         config.setIdpAlias("");
@@ -95,8 +102,10 @@ class ConditionalIdpRateLimitingAuthenticatorTest {
         config = new ConditionalIdpRateLimitingAuthenticatorConfig();
         config.setIdpLimit(5);
         config.setIdpAlias(null);
+        config.setResetIntervalHours(24);
 
         assertTrue(config.isGlobalLimit());
         assertTrue(config.getIdpAlias().isEmpty());
+        assertTrue(config.getResetIntervalHours() == 24);
     }
 }

@@ -8,8 +8,8 @@ import org.keycloak.models.UserModel;
 import org.keycloak.sessions.AuthenticationSessionModel;
 
 
-import java.time.LocalDate;
-import java.time.ZoneId;
+//import java.time.LocalDate;
+//import java.time.ZoneId;
 import java.util.Optional;
 
 public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthenticator {
@@ -20,6 +20,7 @@ public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthe
 
     private static final String ATTEMPTS_ATTRIBUTE_PREFIX = "idp_attempts_";
     private static final String LAST_RESET_ATTRIBUTE_PREFIX = "idp_last_reset_";
+    private static final String REMAINING_ATTEMPTS_ATTRIBUTE_PREFIX = "idp_remaining_attempts_";
 
     @Override
     public boolean matchCondition(AuthenticationFlowContext context) {
@@ -46,17 +47,22 @@ public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthe
             final String effectiveIdpAlias = idpAlias.get();
             LOG.debugf("Checking rate limit for IdP: %s, limit: %d", effectiveIdpAlias, config.getIdpLimit());
 
-            // Check and reset daily counter if needed
-            checkAndResetDailyCounter(user, effectiveIdpAlias);
+            // Check and reset counter if needed
+            synchronized (user.getId().intern()) {
+                checkAndResetCounter(user, effectiveIdpAlias, config.getResetIntervalHours());
 
-            // Increment counter and check if limit reached
-            final boolean limitReached = incrementAndCheckLimit(user, effectiveIdpAlias, config.getIdpLimit());
+                // Increment counter and check if limit reached
+                final boolean limitReached = incrementAndCheckLimit(user, effectiveIdpAlias, config.getIdpLimit());
 
-            if (limitReached) {
-                LOG.warnf("Rate limit exceeded for user %s via IdP %s", user.getUsername(), effectiveIdpAlias);
+                // Update remaining attempts attribute
+                updateRemainingAttempts(user, effectiveIdpAlias, config.getIdpLimit());
+
+                if (limitReached) {
+                    LOG.warnf("Rate limit exceeded for user %s via IdP %s", user.getUsername(), effectiveIdpAlias);
+                }
+
+                return limitReached;
             }
-
-            return limitReached;
         } catch (Exception e) {
             LOG.error("Error checking rate limit condition", e);
             return false;
@@ -95,37 +101,38 @@ public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthe
 
     private Optional<String> getBrokerIdentityProviderAlias(AuthenticationFlowContext context) {
         try {
-            // Try to extract from broker context through SerializedBrokeredIdentityContext
-            // This is used during the broker authentication flow
             AuthenticationSessionModel authSession = context.getAuthenticationSession();
             if (authSession == null) {
                 return Optional.empty();
             }
 
-            // Try to find BROKERED_CONTEXT_NOTE
+            // Try to get from BROKER_IDENTITY_PROVIDER note (more reliable than parsing)
+            String idpFromBrokerNote = authSession.getAuthNote("BROKER_IDENTITY_PROVIDER");
+            if (idpFromBrokerNote != null && !idpFromBrokerNote.trim().isEmpty()) {
+                return Optional.of(idpFromBrokerNote);
+            }
+
+            // Fallback: try to parse BROKERED_CONTEXT_NOTE if needed
             String brokerContextKey = "BROKERED_CONTEXT_NOTE";
             String serializedContext = authSession.getAuthNote(brokerContextKey);
 
             if (serializedContext != null) {
-                // Extract IdP alias from serialized context
-                // Format is typically: "...idpAlias=<alias>..."
+                // Extract IdP alias from serialized context more robustly
+                // Look for "idpAlias":"value" pattern
                 int idpAliasIndex = serializedContext.indexOf("\"idpAlias\"");
                 if (idpAliasIndex != -1) {
-                    int startIndex = serializedContext.indexOf("\"", idpAliasIndex + 10) + 1;
-                    int endIndex = serializedContext.indexOf("\"", startIndex);
-                    if (startIndex > 0 && endIndex > startIndex) {
-                        String idpAlias = serializedContext.substring(startIndex, endIndex);
-                        if (!idpAlias.isEmpty()) {
-                            return Optional.of(idpAlias);
+                    int colonIndex = serializedContext.indexOf(":", idpAliasIndex);
+                    if (colonIndex != -1) {
+                        int startIndex = serializedContext.indexOf("\"", colonIndex) + 1;
+                        int endIndex = serializedContext.indexOf("\"", startIndex);
+                        if (startIndex > 0 && endIndex > startIndex) {
+                            String idpAlias = serializedContext.substring(startIndex, endIndex);
+                            if (!idpAlias.isEmpty()) {
+                                return Optional.of(idpAlias);
+                            }
                         }
                     }
                 }
-            }
-
-            // Try alternative approach: IDENTITY_PROVIDER_RETURN_TO note
-            String idpFromReturnTo = authSession.getAuthNote("IDENTITY_PROVIDER");
-            if (idpFromReturnTo != null && !idpFromReturnTo.isEmpty()) {
-                return Optional.of(idpFromReturnTo);
             }
 
             return Optional.empty();
@@ -135,23 +142,19 @@ public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthe
         }
     }
 
-    private void checkAndResetDailyCounter(UserModel user, String idpAlias) {
+    private void checkAndResetCounter(UserModel user, String idpAlias, int resetIntervalHours) {
         final String lastResetKey = generateAttributeKey(idpAlias, LAST_RESET_ATTRIBUTE_PREFIX);
         final String attemptsKey = generateAttributeKey(idpAlias, ATTEMPTS_ATTRIBUTE_PREFIX);
 
         final String lastResetStr = user.getFirstAttribute(lastResetKey);
-        final LocalDate today = LocalDate.now(ZoneId.systemDefault());
+        final long currentTimeMillis = System.currentTimeMillis();
+        final long resetIntervalMillis = (long) resetIntervalHours * 60 * 60 * 1000;
 
         boolean shouldReset = true;
         if (lastResetStr != null && !lastResetStr.trim().isEmpty()) {
             try {
                 final long lastResetTimestamp = Long.parseLong(lastResetStr);
-                final LocalDate lastResetDate = java.time.Instant
-                        .ofEpochMilli(lastResetTimestamp)
-                        .atZone(ZoneId.systemDefault())
-                        .toLocalDate();
-
-                shouldReset = !lastResetDate.equals(today);
+                shouldReset = (currentTimeMillis - lastResetTimestamp) >= resetIntervalMillis;
             } catch (NumberFormatException e) {
                 LOG.warnf("Invalid last reset timestamp for user %s, key %s: %s", 
                         user.getUsername(), lastResetKey, lastResetStr);
@@ -160,10 +163,9 @@ public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthe
         }
 
         if (shouldReset) {
-            final long todayTimestamp = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
-            user.setSingleAttribute(lastResetKey, String.valueOf(todayTimestamp));
+            user.setSingleAttribute(lastResetKey, String.valueOf(currentTimeMillis));
             user.setSingleAttribute(attemptsKey, "0");
-            LOG.debugf("Reset daily counter for user %s, IdP %s", user.getUsername(), idpAlias);
+            LOG.debugf("Reset counter for user %s, IdP %s after %d hours", user.getUsername(), idpAlias, resetIntervalHours);
         }
     }
 
@@ -190,6 +192,27 @@ public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthe
                 user.getUsername(), idpAlias, currentAttempts, limit);
 
         return currentAttempts >= limit;
+    }
+
+    private void updateRemainingAttempts(UserModel user, String idpAlias, int limit) {
+        final String attemptsKey = generateAttributeKey(idpAlias, ATTEMPTS_ATTRIBUTE_PREFIX);
+        final String remainingKey = generateAttributeKey(idpAlias, REMAINING_ATTEMPTS_ATTRIBUTE_PREFIX);
+
+        String currentAttemptsStr = user.getFirstAttribute(attemptsKey);
+        int currentAttempts = 0;
+
+        if (currentAttemptsStr != null && !currentAttemptsStr.trim().isEmpty()) {
+            try {
+                currentAttempts = Integer.parseInt(currentAttemptsStr);
+            } catch (NumberFormatException e) {
+                LOG.warnf("Invalid attempts count for user %s, key %s: %s",
+                        user.getUsername(), attemptsKey, currentAttemptsStr);
+                currentAttempts = 0;
+            }
+        }
+
+        int remaining = Math.max(0, limit - currentAttempts);
+        user.setSingleAttribute(remainingKey, String.valueOf(remaining));
     }
 
     private String generateAttributeKey(String idpAlias, String prefix) {

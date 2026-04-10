@@ -17,6 +17,7 @@ public class ConditionalIdpRateLimitingAuthenticatorFactory implements Condition
 
     static final String CONF_IDP_LIMIT = "idp-limit";
     static final String CONF_IDP_ALIAS = "idp-alias";
+    static final String CONF_RESET_INTERVAL_HOURS = "reset-interval-hours";
 
     private static final AuthenticationExecutionModel.Requirement[] REQUIREMENT_CHOICES = new AuthenticationExecutionModel.Requirement[]{
             AuthenticationExecutionModel.Requirement.REQUIRED,
@@ -65,8 +66,8 @@ public class ConditionalIdpRateLimitingAuthenticatorFactory implements Condition
 
     @Override
     public String getHelpText() {
-        return "Flow is executed only if the user exceeds the daily authentication limit for a specific identity provider. "
-                + "The counter is automatically reset at midnight each day. "
+        return "Flow is executed only if the user exceeds the authentication limit for a specific identity provider within the configured time interval. "
+                + "The counter is automatically reset after the specified number of hours. "
                 + "Use this condition before a Deny Access or error handling authenticator to block users who authenticate too many times through the same provider.";
     }
 
@@ -89,7 +90,15 @@ public class ConditionalIdpRateLimitingAuthenticatorFactory implements Condition
                 + "Examples: 'google', 'github', 'keycloak'");
         idpAlias.setRequired(false);
 
-        return Arrays.asList(idpLimit, idpAlias);
+        final ProviderConfigProperty resetIntervalHours = new ProviderConfigProperty();
+        resetIntervalHours.setType(INTEGER_TYPE);
+        resetIntervalHours.setName(CONF_RESET_INTERVAL_HOURS);
+        resetIntervalHours.setDefaultValue("24");
+        resetIntervalHours.setLabel("Reset interval (hours)");
+        resetIntervalHours.setHelpText("Interval in hours after which the authentication counter is automatically reset. Default is 24 hours (daily).");
+        resetIntervalHours.setRequired(true);
+
+        return Arrays.asList(idpLimit, idpAlias, resetIntervalHours);
     }
 
     @Override
