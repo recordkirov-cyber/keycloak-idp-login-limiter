@@ -1,6 +1,7 @@
 package org.keycloak.authentication.authenticators.conditional;
 
 import org.keycloak.Config;
+import org.keycloak.authentication.AuthenticatorFactory;
 import org.keycloak.models.AuthenticationExecutionModel;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.provider.ProviderConfigProperty;
@@ -11,9 +12,9 @@ import java.util.List;
 import static org.keycloak.provider.ProviderConfigProperty.INTEGER_TYPE;
 import static org.keycloak.provider.ProviderConfigProperty.STRING_TYPE;
 
-public class ConditionalIdpRateLimitingAuthenticatorFactory implements ConditionalAuthenticatorFactory {
+public class IdpRateLimitingAuthenticatorFactory implements AuthenticatorFactory {
 
-    public static final String PROVIDER_ID = "conditional-idp-rate-limiting";
+    public static final String PROVIDER_ID = "idp-rate-limiting";
 
     static final String CONF_IDP_LIMIT = "idp-limit";
     static final String CONF_IDP_ALIAS = "idp-alias";
@@ -21,6 +22,7 @@ public class ConditionalIdpRateLimitingAuthenticatorFactory implements Condition
 
     private static final AuthenticationExecutionModel.Requirement[] REQUIREMENT_CHOICES = new AuthenticationExecutionModel.Requirement[]{
             AuthenticationExecutionModel.Requirement.REQUIRED,
+            AuthenticationExecutionModel.Requirement.ALTERNATIVE,
             AuthenticationExecutionModel.Requirement.DISABLED
     };
 
@@ -45,8 +47,13 @@ public class ConditionalIdpRateLimitingAuthenticatorFactory implements Condition
     }
 
     @Override
+    public String getReferenceCategory() {
+        return "IdP Rate Limiting";
+    }
+
+    @Override
     public String getDisplayType() {
-        return "Condition - Identity Provider Rate Limiting";
+        return "Identity Provider Rate Limiting";
     }
 
     @Override
@@ -66,9 +73,10 @@ public class ConditionalIdpRateLimitingAuthenticatorFactory implements Condition
 
     @Override
     public String getHelpText() {
-        return "Flow is executed only if the user exceeds the authentication limit for a specific identity provider within the configured time interval. "
+        return "Blocks authentication if the user exceeds the authentication limit for a specific identity provider within the configured time interval. "
                 + "The counter is automatically reset after the specified number of hours. "
-                + "Use this condition before a Deny Access or error handling authenticator to block users who authenticate too many times through the same provider.";
+                + "Use this authenticator to prevent brute-force attacks or limit usage per identity provider. "
+                + "Supports both per-IdP limits and global limits across all identity providers.";
     }
 
     @Override
@@ -77,8 +85,8 @@ public class ConditionalIdpRateLimitingAuthenticatorFactory implements Condition
         idpLimit.setType(INTEGER_TYPE);
         idpLimit.setName(CONF_IDP_LIMIT);
         idpLimit.setDefaultValue("5");
-        idpLimit.setLabel("Daily authentication limit");
-        idpLimit.setHelpText("Maximum number of authentications allowed per day via the specified identity provider. Must be greater than 0.");
+        idpLimit.setLabel("Authentication limit");
+        idpLimit.setHelpText("Maximum number of authentications allowed within the reset interval via the specified identity provider. Must be greater than 0.");
         idpLimit.setRequired(true);
 
         final ProviderConfigProperty idpAlias = new ProviderConfigProperty();
@@ -95,14 +103,15 @@ public class ConditionalIdpRateLimitingAuthenticatorFactory implements Condition
         resetIntervalHours.setName(CONF_RESET_INTERVAL_HOURS);
         resetIntervalHours.setDefaultValue("24");
         resetIntervalHours.setLabel("Reset interval (hours)");
-        resetIntervalHours.setHelpText("Interval in hours after which the authentication counter is automatically reset. Default is 24 hours (daily).");
+        resetIntervalHours.setHelpText("Interval in hours after which the authentication counter is automatically reset. "
+                + "Default is 24 hours. For example, setting this to 1 will reset the counter every hour.");
         resetIntervalHours.setRequired(true);
 
         return Arrays.asList(idpLimit, idpAlias, resetIntervalHours);
     }
 
     @Override
-    public ConditionalAuthenticator getSingleton() {
-        return ConditionalIdpRateLimitingAuthenticator.SINGLETON;
+    public org.keycloak.authentication.Authenticator create(org.keycloak.models.KeycloakSession session) {
+        return IdpRateLimitingAuthenticator.SINGLETON;
     }
 }

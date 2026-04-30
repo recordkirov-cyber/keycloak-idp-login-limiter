@@ -2,53 +2,70 @@ package org.keycloak.authentication.authenticators.conditional;
 
 import org.jboss.logging.Logger;
 import org.keycloak.authentication.AuthenticationFlowContext;
+import org.keycloak.authentication.AuthenticationFlowError;
+import org.keycloak.authentication.Authenticator;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.sessions.AuthenticationSessionModel;
 
-
-//import java.time.LocalDate;
-//import java.time.ZoneId;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
-public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthenticator {
+public class IdpRateLimitingAuthenticator implements Authenticator {
 
-    public static final ConditionalIdpRateLimitingAuthenticator SINGLETON = new ConditionalIdpRateLimitingAuthenticator();
+    public static final IdpRateLimitingAuthenticator SINGLETON = new IdpRateLimitingAuthenticator();
 
-    private static final Logger LOG = Logger.getLogger(ConditionalIdpRateLimitingAuthenticator.class);
+    private static final Logger LOG = Logger.getLogger(IdpRateLimitingAuthenticator.class);
 
     private static final String ATTEMPTS_ATTRIBUTE_PREFIX = "idp_attempts_";
     private static final String LAST_RESET_ATTRIBUTE_PREFIX = "idp_last_reset_";
     private static final String REMAINING_ATTEMPTS_ATTRIBUTE_PREFIX = "idp_remaining_attempts_";
 
+    // Thread-safe lock registry to avoid memory leaks from string interning
+    private final ConcurrentHashMap<String, Lock> userLocks = new ConcurrentHashMap<>();
+
     @Override
-    public boolean matchCondition(AuthenticationFlowContext context) {
-        final ConditionalIdpRateLimitingAuthenticatorConfig config =
-                new ConditionalIdpRateLimitingAuthenticatorConfig(context.getAuthenticatorConfig());
-        return matchCondition(context, config);
+    public void authenticate(AuthenticationFlowContext context) {
+        try {
+            final IdpRateLimitingAuthenticatorConfig config =
+                    new IdpRateLimitingAuthenticatorConfig(context.getAuthenticatorConfig());
+            authenticate(context, config);
+        } catch (Exception e) {
+            LOG.error("Error initializing authenticator configuration", e);
+            context.success(); // Allow authentication on configuration error
+        }
     }
 
     // package-private for testing
-    boolean matchCondition(AuthenticationFlowContext context, ConditionalIdpRateLimitingAuthenticatorConfig config) {
+    void authenticate(AuthenticationFlowContext context, IdpRateLimitingAuthenticatorConfig config) {
         try {
             final UserModel user = context.getUser();
             if (user == null) {
                 LOG.warn("User not found in authentication context");
-                return false;
+                context.success();
+                return;
             }
 
             final Optional<String> idpAlias = getIdentityProviderAlias(context, config);
             if (idpAlias.isEmpty()) {
-                LOG.warn("Identity provider alias not found");
-                return false;
+                LOG.debug("Identity provider alias not found or not applicable for this authentication");
+                context.success();
+                return;
             }
 
             final String effectiveIdpAlias = idpAlias.get();
             LOG.debugf("Checking rate limit for IdP: %s, limit: %d", effectiveIdpAlias, config.getIdpLimit());
 
-            // Check and reset counter if needed
-            synchronized (user.getId().intern()) {
+            // Use proper thread-safe locking mechanism instead of string interning
+            final String lockKey = user.getId() + ":" + effectiveIdpAlias;
+            final Lock lock = userLocks.computeIfAbsent(lockKey, k -> new ReentrantLock());
+
+            lock.lock();
+            try {
+                // Check and reset counter if needed
                 checkAndResetCounter(user, effectiveIdpAlias, config.getResetIntervalHours());
 
                 // Increment counter and check if limit reached
@@ -59,17 +76,20 @@ public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthe
 
                 if (limitReached) {
                     LOG.warnf("Rate limit exceeded for user %s via IdP %s", user.getUsername(), effectiveIdpAlias);
+                    context.failure(AuthenticationFlowError.INVALID_CREDENTIALS);
+                } else {
+                    context.success();
                 }
-
-                return limitReached;
+            } finally {
+                lock.unlock();
             }
         } catch (Exception e) {
             LOG.error("Error checking rate limit condition", e);
-            return false;
+            context.success(); // Allow authentication on error
         }
     }
 
-    private Optional<String> getIdentityProviderAlias(AuthenticationFlowContext context, ConditionalIdpRateLimitingAuthenticatorConfig config) {
+    private Optional<String> getIdentityProviderAlias(AuthenticationFlowContext context, IdpRateLimitingAuthenticatorConfig config) {
         // If specific IdP is configured, use it
         if (!config.isGlobalLimit()) {
             return Optional.of(config.getIdpAlias());
@@ -84,15 +104,13 @@ public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthe
         // Try to get from authentication session note (for subsequent authentications)
         AuthenticationSessionModel authSession = context.getAuthenticationSession();
         if (authSession != null) {
-            String idpFromNote = authSession.getAuthNote("IDENTITY_PROVIDER");
-            if (idpFromNote != null && !idpFromNote.trim().isEmpty()) {
-                return Optional.of(idpFromNote);
-            }
-
-            // Alternative note name used in some Keycloak versions
-            idpFromNote = authSession.getAuthNote("BROKER_IDENTITY_PROVIDER");
-            if (idpFromNote != null && !idpFromNote.trim().isEmpty()) {
-                return Optional.of(idpFromNote);
+            // Check primary note names
+            String[] noteKeys = {"BROKER_IDENTITY_PROVIDER", "IDENTITY_PROVIDER"};
+            for (String noteKey : noteKeys) {
+                String idpFromNote = authSession.getAuthNote(noteKey);
+                if (idpFromNote != null && !idpFromNote.trim().isEmpty()) {
+                    return Optional.of(idpFromNote);
+                }
             }
         }
 
@@ -106,33 +124,16 @@ public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthe
                 return Optional.empty();
             }
 
-            // Try to get from BROKER_IDENTITY_PROVIDER note (more reliable than parsing)
+            // Try to get from BROKER_IDENTITY_PROVIDER note (most reliable approach)
             String idpFromBrokerNote = authSession.getAuthNote("BROKER_IDENTITY_PROVIDER");
             if (idpFromBrokerNote != null && !idpFromBrokerNote.trim().isEmpty()) {
                 return Optional.of(idpFromBrokerNote);
             }
 
-            // Fallback: try to parse BROKERED_CONTEXT_NOTE if needed
-            String brokerContextKey = "BROKERED_CONTEXT_NOTE";
-            String serializedContext = authSession.getAuthNote(brokerContextKey);
-
-            if (serializedContext != null) {
-                // Extract IdP alias from serialized context more robustly
-                // Look for "idpAlias":"value" pattern
-                int idpAliasIndex = serializedContext.indexOf("\"idpAlias\"");
-                if (idpAliasIndex != -1) {
-                    int colonIndex = serializedContext.indexOf(":", idpAliasIndex);
-                    if (colonIndex != -1) {
-                        int startIndex = serializedContext.indexOf("\"", colonIndex) + 1;
-                        int endIndex = serializedContext.indexOf("\"", startIndex);
-                        if (startIndex > 0 && endIndex > startIndex) {
-                            String idpAlias = serializedContext.substring(startIndex, endIndex);
-                            if (!idpAlias.isEmpty()) {
-                                return Optional.of(idpAlias);
-                            }
-                        }
-                    }
-                }
+            // Alternative note name used in some Keycloak versions
+            String idpFromIdentityNote = authSession.getAuthNote("IDENTITY_PROVIDER");
+            if (idpFromIdentityNote != null && !idpFromIdentityNote.trim().isEmpty()) {
+                return Optional.of(idpFromIdentityNote);
             }
 
             return Optional.empty();
@@ -156,7 +157,7 @@ public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthe
                 final long lastResetTimestamp = Long.parseLong(lastResetStr);
                 shouldReset = (currentTimeMillis - lastResetTimestamp) >= resetIntervalMillis;
             } catch (NumberFormatException e) {
-                LOG.warnf("Invalid last reset timestamp for user %s, key %s: %s", 
+                LOG.warnf("Invalid last reset timestamp for user %s, key %s: %s",
                         user.getUsername(), lastResetKey, lastResetStr);
                 shouldReset = true;
             }
@@ -172,47 +173,43 @@ public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthe
     // Returns true if limit is reached after incrementing
     private boolean incrementAndCheckLimit(UserModel user, String idpAlias, int limit) {
         final String attemptsKey = generateAttributeKey(idpAlias, ATTEMPTS_ATTRIBUTE_PREFIX);
+        final int currentAttempts = getCurrentAttemptCount(user, attemptsKey);
+        final int newAttempts = currentAttempts + 1;
 
-        String currentAttemptsStr = user.getFirstAttribute(attemptsKey);
-        int currentAttempts = 0;
-
-        if (currentAttemptsStr != null && !currentAttemptsStr.trim().isEmpty()) {
-            try {
-                currentAttempts = Integer.parseInt(currentAttemptsStr);
-            } catch (NumberFormatException e) {
-                LOG.warnf("Invalid attempts count for user %s, key %s: %s",
-                        user.getUsername(), attemptsKey, currentAttemptsStr);
-                currentAttempts = 0;
-            }
-        }
-
-        currentAttempts++;
-        user.setSingleAttribute(attemptsKey, String.valueOf(currentAttempts));
+        user.setSingleAttribute(attemptsKey, String.valueOf(newAttempts));
         LOG.debugf("Incremented attempts for user %s, IdP %s: %d/%d",
-                user.getUsername(), idpAlias, currentAttempts, limit);
+                user.getUsername(), idpAlias, newAttempts, limit);
 
-        return currentAttempts >= limit;
+        return newAttempts >= limit;
     }
 
     private void updateRemainingAttempts(UserModel user, String idpAlias, int limit) {
         final String attemptsKey = generateAttributeKey(idpAlias, ATTEMPTS_ATTRIBUTE_PREFIX);
         final String remainingKey = generateAttributeKey(idpAlias, REMAINING_ATTEMPTS_ATTRIBUTE_PREFIX);
 
-        String currentAttemptsStr = user.getFirstAttribute(attemptsKey);
-        int currentAttempts = 0;
+        final int currentAttempts = getCurrentAttemptCount(user, attemptsKey);
+        final int remaining = Math.max(0, limit - currentAttempts);
+        user.setSingleAttribute(remainingKey, String.valueOf(remaining));
+    }
 
+    /**
+     * Gets the current attempt count from user attributes, handling parsing errors gracefully.
+     *
+     * @param user the user model
+     * @param attemptsKey the attribute key for attempts
+     * @return the current attempt count (0 if not found or invalid)
+     */
+    private int getCurrentAttemptCount(UserModel user, String attemptsKey) {
+        String currentAttemptsStr = user.getFirstAttribute(attemptsKey);
         if (currentAttemptsStr != null && !currentAttemptsStr.trim().isEmpty()) {
             try {
-                currentAttempts = Integer.parseInt(currentAttemptsStr);
+                return Integer.parseInt(currentAttemptsStr);
             } catch (NumberFormatException e) {
                 LOG.warnf("Invalid attempts count for user %s, key %s: %s",
                         user.getUsername(), attemptsKey, currentAttemptsStr);
-                currentAttempts = 0;
             }
         }
-
-        int remaining = Math.max(0, limit - currentAttempts);
-        user.setSingleAttribute(remainingKey, String.valueOf(remaining));
+        return 0;
     }
 
     private String generateAttributeKey(String idpAlias, String prefix) {
@@ -224,8 +221,13 @@ public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthe
     }
 
     @Override
+    public boolean configuredFor(KeycloakSession session, RealmModel realm, UserModel user) {
+        return true;
+    }
+
+    @Override
     public void action(AuthenticationFlowContext context) {
-        // Not used - this is a conditional authenticator
+        // Not used - authentication logic is in authenticate()
     }
 
     @Override
@@ -235,11 +237,12 @@ public class ConditionalIdpRateLimitingAuthenticator implements ConditionalAuthe
 
     @Override
     public void setRequiredActions(KeycloakSession session, RealmModel realm, UserModel user) {
-        // Not used - this is a conditional authenticator
+        // Not used
     }
 
     @Override
     public void close() {
-        // Does nothing
+        // Cleanup locks to prevent memory leaks
+        userLocks.clear();
     }
 }
