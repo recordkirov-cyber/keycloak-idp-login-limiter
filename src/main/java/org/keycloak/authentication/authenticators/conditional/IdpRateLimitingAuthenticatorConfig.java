@@ -34,7 +34,13 @@ class IdpRateLimitingAuthenticatorConfig {
         if (configModel == null) {
             throw new IllegalArgumentException("AuthenticatorConfigModel cannot be null");
         }
-        this(configModel.getConfig());
+        Map<String, String> configMap = configModel.getConfig();
+        if (configMap == null) {
+            throw new IllegalArgumentException("Configuration map cannot be null");
+        }
+        this.idpLimit = parseIdpLimit(configMap);
+        this.idpAlias = configMap.getOrDefault(CONF_IDP_ALIAS, "");
+        this.resetIntervalHours = parseResetIntervalHours(configMap);
     }
 
     /**

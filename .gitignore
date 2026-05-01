@@ -81,5 +81,7 @@ fabric.properties
 /.classpath
 /.factorypath
 /.project
+/.vscode
+/.claude
 
 target

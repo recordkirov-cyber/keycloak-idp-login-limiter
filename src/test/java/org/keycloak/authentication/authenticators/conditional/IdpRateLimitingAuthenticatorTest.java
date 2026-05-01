@@ -9,7 +9,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 import static org.keycloak.authentication.authenticators.conditional.IdpRateLimitingAuthenticatorFactory.*;
 
 @DisplayName("IdpRateLimitingAuthenticator Tests")
