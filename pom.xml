@@ -6,7 +6,7 @@
 
     <groupId>org.keycloak</groupId>
     <artifactId>keycloak-idp-login-limiter</artifactId>
-    <version>${keycloak.version}_1</version>
+    <version>26.5.7_1</version>
     <name>Keycloak IDP Login Limiter Condition</name>
 
     <properties>
