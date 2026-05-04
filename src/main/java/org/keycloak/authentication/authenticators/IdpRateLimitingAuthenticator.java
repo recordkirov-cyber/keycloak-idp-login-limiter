@@ -112,7 +112,7 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
             if (user == null) {
                 LOG.warn("User not found in authentication context");
                 // Fail closed for security - block authentication when user not found
-                context.failure(AuthenticationFlowError.USER_NOT_FOUND);
+                context.failure(AuthenticationFlowError.UNKNOWN_USER);
                 return;
             }
 
