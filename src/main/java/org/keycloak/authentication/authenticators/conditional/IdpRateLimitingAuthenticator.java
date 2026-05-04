@@ -22,7 +22,6 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
 
     private static final String ATTEMPTS_ATTRIBUTE_PREFIX = "idp_attempts_";
     private static final String LAST_RESET_ATTRIBUTE_PREFIX = "idp_last_reset_";
-    private static final String REMAINING_ATTEMPTS_ATTRIBUTE_PREFIX = "idp_remaining_attempts_";
 
     // Thread-safe lock registry to avoid memory leaks from string interning
     private final ConcurrentHashMap<String, Lock> userLocks = new ConcurrentHashMap<>();
@@ -70,9 +69,6 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
 
                 // Increment counter and check if limit reached
                 final boolean limitReached = incrementAndCheckLimit(user, effectiveIdpAlias, config.getIdpLimit());
-
-                // Update remaining attempts attribute
-                updateRemainingAttempts(user, effectiveIdpAlias, config.getIdpLimit());
 
                 if (limitReached) {
                     LOG.warnf("Rate limit exceeded for user %s via IdP %s", user.getUsername(), effectiveIdpAlias);
@@ -181,15 +177,6 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
                 user.getUsername(), idpAlias, newAttempts, limit);
 
         return newAttempts >= limit;
-    }
-
-    private void updateRemainingAttempts(UserModel user, String idpAlias, int limit) {
-        final String attemptsKey = generateAttributeKey(idpAlias, ATTEMPTS_ATTRIBUTE_PREFIX);
-        final String remainingKey = generateAttributeKey(idpAlias, REMAINING_ATTEMPTS_ATTRIBUTE_PREFIX);
-
-        final int currentAttempts = getCurrentAttemptCount(user, attemptsKey);
-        final int remaining = Math.max(0, limit - currentAttempts);
-        user.setSingleAttribute(remainingKey, String.valueOf(remaining));
     }
 
     /**
