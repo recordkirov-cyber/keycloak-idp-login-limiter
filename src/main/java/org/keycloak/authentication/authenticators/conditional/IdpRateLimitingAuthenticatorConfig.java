@@ -17,6 +17,7 @@ class IdpRateLimitingAuthenticatorConfig {
     private int idpLimit;
     private String idpAlias;
     private int resetIntervalHours;
+    private String errorMessage;
 
     /**
      * Default constructor for manual configuration.
@@ -41,6 +42,7 @@ class IdpRateLimitingAuthenticatorConfig {
         this.idpLimit = parseIdpLimit(configMap);
         this.idpAlias = configMap.getOrDefault(CONF_IDP_ALIAS, "");
         this.resetIntervalHours = parseResetIntervalHours(configMap);
+        this.errorMessage = configMap.getOrDefault(CONF_ERROR_MESSAGE, "");
     }
 
     /**
@@ -56,6 +58,7 @@ class IdpRateLimitingAuthenticatorConfig {
         this.idpLimit = parseIdpLimit(configMap);
         this.idpAlias = configMap.getOrDefault(CONF_IDP_ALIAS, "");
         this.resetIntervalHours = parseResetIntervalHours(configMap);
+        this.errorMessage = configMap.getOrDefault(CONF_ERROR_MESSAGE, "");
     }
 
     /**
@@ -173,6 +176,33 @@ class IdpRateLimitingAuthenticatorConfig {
         this.resetIntervalHours = resetIntervalHours;
     }
 
+    /**
+     * Gets the custom error message.
+     *
+     * @return the error message, or empty string if not configured
+     */
+    public String getErrorMessage() {
+        return errorMessage;
+    }
+
+    /**
+     * Sets the custom error message.
+     *
+     * @param errorMessage the error message, or null/empty for default
+     */
+    public void setErrorMessage(String errorMessage) {
+        this.errorMessage = errorMessage != null ? errorMessage : "";
+    }
+
+    /**
+     * Checks if a custom error message is configured.
+     *
+     * @return true if custom error message is set, false otherwise
+     */
+    public boolean hasCustomErrorMessage() {
+        return errorMessage != null && !errorMessage.trim().isEmpty();
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -182,7 +212,8 @@ class IdpRateLimitingAuthenticatorConfig {
 
         if (idpLimit != that.idpLimit) return false;
         if (resetIntervalHours != that.resetIntervalHours) return false;
-        return idpAlias.equals(that.idpAlias);
+        if (!idpAlias.equals(that.idpAlias)) return false;
+        return errorMessage.equals(that.errorMessage);
     }
 
     @Override
@@ -190,6 +221,7 @@ class IdpRateLimitingAuthenticatorConfig {
         int result = idpLimit;
         result = 31 * result + idpAlias.hashCode();
         result = 31 * result + resetIntervalHours;
+        result = 31 * result + errorMessage.hashCode();
         return result;
     }
 
@@ -199,6 +231,7 @@ class IdpRateLimitingAuthenticatorConfig {
                 "idpLimit=" + idpLimit +
                 ", idpAlias='" + idpAlias + '\'' +
                 ", resetIntervalHours=" + resetIntervalHours +
+                ", errorMessage='" + errorMessage + '\'' +
                 '}';
     }
 }
