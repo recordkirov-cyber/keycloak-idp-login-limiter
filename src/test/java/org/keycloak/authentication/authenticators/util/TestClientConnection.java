@@ -1,4 +1,4 @@
-package org.keycloak.authentication.authenticators.conditional.util;
+package org.keycloak.authentication.authenticators.util;
 
 import org.keycloak.common.ClientConnection;
 

@@ -1,17 +1,22 @@
-package org.keycloak.authentication.authenticators.conditional;
+package org.keycloak.authentication.authenticators;
 
 import org.keycloak.models.AuthenticatorConfigModel;
 
 import java.util.Map;
 
-import static org.keycloak.authentication.authenticators.conditional.IdpRateLimitingAuthenticatorFactory.CONF_IDP_ALIAS;
-import static org.keycloak.authentication.authenticators.conditional.IdpRateLimitingAuthenticatorFactory.CONF_IDP_LIMIT;
-import static org.keycloak.authentication.authenticators.conditional.IdpRateLimitingAuthenticatorFactory.CONF_RESET_INTERVAL_HOURS;
-import static org.keycloak.authentication.authenticators.conditional.IdpRateLimitingAuthenticatorFactory.CONF_ERROR_MESSAGE;
+import static org.keycloak.authentication.authenticators.IdpRateLimitingAuthenticatorFactory.CONF_IDP_ALIAS;
+import static org.keycloak.authentication.authenticators.IdpRateLimitingAuthenticatorFactory.CONF_IDP_LIMIT;
+import static org.keycloak.authentication.authenticators.IdpRateLimitingAuthenticatorFactory.CONF_RESET_INTERVAL_HOURS;
+import static org.keycloak.authentication.authenticators.IdpRateLimitingAuthenticatorFactory.CONF_ERROR_MESSAGE;
 
 /**
  * Configuration class for the IdP rate limiting authenticator.
+ *
+ * Класс конфигурации для аутентификатора ограничения входов через IdP.
+ *
  * Holds configuration parameters for controlling authentication limits per identity provider.
+ *
+ * Содержит параметры конфигурации для управления лимитами аутентификации по провайдерам идентификации.
  */
 class IdpRateLimitingAuthenticatorConfig {
 

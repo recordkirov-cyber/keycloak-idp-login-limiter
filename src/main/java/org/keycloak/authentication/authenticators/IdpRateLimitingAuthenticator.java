@@ -1,4 +1,4 @@
-package org.keycloak.authentication.authenticators.conditional;
+package org.keycloak.authentication.authenticators;
 
 import org.jboss.logging.Logger;
 import org.keycloak.authentication.AuthenticationFlowContext;
@@ -16,18 +16,65 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * Identity Provider Rate Limiting Authenticator
+ *
+ * Аутентификатор ограничения входов через провайдер идентификации
+ *
+ * This authenticator limits the number of authentication attempts a user can make
+ * through a specific Identity Provider (IdP) within a configurable time interval.
+ * It tracks authentication attempts using user attributes and blocks further
+ * authentication when the configured limit is reached.
+ *
+ * Этот аутентификатор ограничивает количество попыток аутентификации, которые пользователь
+ * может выполнить через определенный провайдер идентификации (IdP) в течение настраиваемого
+ * временного интервала. Он отслеживает попытки аутентификации с помощью атрибутов пользователя
+ * и блокирует дальнейшую аутентификацию при достижении установленного лимита.
+ */
 public class IdpRateLimitingAuthenticator implements Authenticator {
 
-    public static final IdpRateLimitingAuthenticator SINGLETON = new IdpRateLimitingAuthenticator();
+    /**
+     * Default error message key when rate limit is exceeded
+     *
+     * Ключ сообщения об ошибке по умолчанию при превышении лимита
+     */
+    public static final String IDP_RATE_LIMIT_EXCEEDED = "idpRateLimitExceeded";
 
     private static final Logger LOG = Logger.getLogger(IdpRateLimitingAuthenticator.class);
 
     private static final String ATTEMPTS_ATTRIBUTE_PREFIX = "idp_attempts_";
     private static final String LAST_RESET_ATTRIBUTE_PREFIX = "idp_last_reset_";
 
-    // Thread-safe lock registry to avoid memory leaks from string interning
-    private final ConcurrentHashMap<String, Lock> userLocks = new ConcurrentHashMap<>();
+    // Thread-safe lock registry with cleanup mechanism
+    private static final ConcurrentHashMap<String, Lock> userLocks = new ConcurrentHashMap<>();
 
+    // Timestamps for lock cleanup
+    private static final ConcurrentHashMap<String, Long> lockTimestamps = new ConcurrentHashMap<>();
+
+    // Lock cleanup threshold (1 hour)
+    private static final long LOCK_CLEANUP_THRESHOLD = 60 * 60 * 1000L;
+
+    // Last cleanup timestamp
+    private static volatile long lastCleanupTime = System.currentTimeMillis();
+
+    // Cleanup interval (10 minutes)
+    private static final long CLEANUP_INTERVAL = 10 * 60 * 1000L;
+
+    /**
+     * Performs authentication with rate limiting based on Identity Provider.
+     *
+     * Выполняет аутентификацию с ограничением по провайдеру идентификации.
+     *
+     * This method extracts the configuration from the authentication context,
+     * validates it, and delegates to the overloaded authenticate method.
+     * If configuration fails, authentication is blocked for security.
+     *
+     * Этот метод извлекает конфигурацию из контекста аутентификации,
+     * проверяет её и делегирует выполнение перегруженному методу authenticate.
+     * При ошибке конфигурации аутентификация блокируется в целях безопасности.
+     *
+     * @param context the authentication flow context / контекст потока аутентификации
+     */
     @Override
     public void authenticate(AuthenticationFlowContext context) {
         try {
@@ -36,23 +83,43 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
             authenticate(context, config);
         } catch (Exception e) {
             LOG.error("Error initializing authenticator configuration", e);
-            context.success(); // Allow authentication on configuration error
+            // Fail closed for security - block authentication on configuration error
+            // Закрытое состояние для безопасности - блокировка аутентификации при ошибке конфигурации
+            context.failure(AuthenticationFlowError.INTERNAL_ERROR);
         }
     }
 
+    /**
+     * Performs authentication with the provided configuration.
+     *
+     * Выполняет аутентификацию с предоставленной конфигурацией.
+     *
+     * This is the main authentication logic that checks rate limits for the user
+     * and specific Identity Provider. It uses thread-safe locking to prevent
+     * race conditions and tracks authentication attempts using user attributes.
+     *
+     * Это основная логика аутентификации, которая проверяет лимиты для пользователя
+     * и определенного провайдера идентификации. Использует потокобезопасную блокировку
+     * для предотвращения гонок и отслеживает попытки аутентификации через атрибуты пользователя.
+     *
+     * @param context the authentication flow context / контекст потока аутентификации
+     * @param config the authenticator configuration / конфигурация аутентификатора
+     */
     // package-private for testing
     void authenticate(AuthenticationFlowContext context, IdpRateLimitingAuthenticatorConfig config) {
         try {
             final UserModel user = context.getUser();
             if (user == null) {
                 LOG.warn("User not found in authentication context");
-                context.success();
+                // Fail closed for security - block authentication when user not found
+                context.failure(AuthenticationFlowError.USER_NOT_FOUND);
                 return;
             }
 
             final Optional<String> idpAlias = getIdentityProviderAlias(context, config);
             if (idpAlias.isEmpty()) {
                 LOG.debug("Identity provider alias not found or not applicable for this authentication");
+                // Allow authentication to proceed when no IdP is found (not an error condition)
                 context.success();
                 return;
             }
@@ -60,9 +127,21 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
             final String effectiveIdpAlias = idpAlias.get();
             LOG.debugf("Checking rate limit for IdP: %s, limit: %d", effectiveIdpAlias, config.getIdpLimit());
 
-            // Use proper thread-safe locking mechanism instead of string interning
+            // Use proper thread-safe locking mechanism with cleanup tracking
             final String lockKey = user.getId() + ":" + effectiveIdpAlias;
             final Lock lock = userLocks.computeIfAbsent(lockKey, k -> new ReentrantLock());
+            lockTimestamps.put(lockKey, System.currentTimeMillis());
+
+            // Perform periodic cleanup
+            final long currentTime = System.currentTimeMillis();
+            if (currentTime - lastCleanupTime > CLEANUP_INTERVAL) {
+                synchronized (IdpRateLimitingAuthenticator.class) {
+                    if (currentTime - lastCleanupTime > CLEANUP_INTERVAL) {
+                        cleanupExpiredLocks();
+                        lastCleanupTime = currentTime;
+                    }
+                }
+            }
 
             lock.lock();
             try {
@@ -74,15 +153,11 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
 
                 if (limitReached) {
                     LOG.warnf("Rate limit exceeded for user %s via IdP %s", user.getUsername(), effectiveIdpAlias);
-                    if (config.hasCustomErrorMessage()) {
-                        final String interpolatedMessage = interpolateErrorMessage(config.getErrorMessage(), user.getUsername(), effectiveIdpAlias, config.getIdpLimit(), config.getResetIntervalHours());
-                        final Response errorResponse = Response.status(Response.Status.UNAUTHORIZED)
-                                .entity(interpolatedMessage)
-                                .build();
-                        context.failure(AuthenticationFlowError.INVALID_CREDENTIALS, errorResponse);
-                    } else {
-                        context.failure(AuthenticationFlowError.INVALID_CREDENTIALS);
-                    }
+                    final String errorMessageKey = config.hasCustomErrorMessage()
+                            ? config.getErrorMessage()
+                            : IDP_RATE_LIMIT_EXCEEDED;
+                    Response challenge = context.form().setError(errorMessageKey).createErrorPage(Response.Status.UNAUTHORIZED);
+                    context.failure(AuthenticationFlowError.INVALID_CREDENTIALS, challenge);
                 } else {
                     context.success();
                 }
@@ -91,7 +166,8 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
             }
         } catch (Exception e) {
             LOG.error("Error checking rate limit condition", e);
-            context.success(); // Allow authentication on error
+            // Fail closed for security - block authentication on runtime error
+            context.failure(AuthenticationFlowError.INTERNAL_ERROR);
         }
     }
 
@@ -217,24 +293,6 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
         return prefix + idpAlias.toLowerCase().replaceAll("[^a-z0-9-_]", "_");
     }
 
-    /**
-     * Interpolates placeholders in the error message with actual values.
-     *
-     * @param message the error message template
-     * @param username the username
-     * @param idpAlias the IdP alias
-     * @param limit the authentication limit
-     * @param resetHours the reset interval in hours
-     * @return the interpolated message
-     */
-    private String interpolateErrorMessage(String message, String username, String idpAlias, int limit, int resetHours) {
-        return message
-                .replace("${username}", username != null ? username : "")
-                .replace("${idpAlias}", idpAlias != null ? idpAlias : "")
-                .replace("${limit}", String.valueOf(limit))
-                .replace("${resetHours}", String.valueOf(resetHours));
-    }
-
     @Override
     public boolean configuredFor(KeycloakSession session, RealmModel realm, UserModel user) {
         return true;
@@ -257,7 +315,32 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
 
     @Override
     public void close() {
-        // Cleanup locks to prevent memory leaks
-        userLocks.clear();
+        // Perform periodic lock cleanup to prevent memory leaks
+        cleanupExpiredLocks();
+    }
+
+    /**
+     * Cleans up expired locks to prevent memory leaks.
+     * This method removes locks that haven't been accessed for LOCK_CLEANUP_THRESHOLD milliseconds.
+     */
+    private static void cleanupExpiredLocks() {
+        final long currentTime = System.currentTimeMillis();
+        final long threshold = LOCK_CLEANUP_THRESHOLD;
+
+        // Create a list of keys to remove to avoid ConcurrentModificationException
+        final java.util.List<String> keysToRemove = new java.util.ArrayList<>();
+        for (java.util.Map.Entry<String, Long> entry : lockTimestamps.entrySet()) {
+            if (currentTime - entry.getValue() > threshold) {
+                keysToRemove.add(entry.getKey());
+            }
+        }
+
+        // Remove the expired entries
+        for (String key : keysToRemove) {
+            lockTimestamps.remove(key);
+            userLocks.remove(key);
+        }
+
+        LOG.debugf("Cleaned up %d expired locks", keysToRemove.size());
     }
 }

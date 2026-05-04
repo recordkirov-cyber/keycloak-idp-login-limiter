@@ -1,4 +1,4 @@
-package org.keycloak.authentication.authenticators.conditional;
+package org.keycloak.authentication.authenticators;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,7 +9,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.keycloak.authentication.authenticators.conditional.IdpRateLimitingAuthenticatorFactory.*;
+import static org.keycloak.authentication.authenticators.IdpRateLimitingAuthenticatorFactory.*;
 
 @DisplayName("IdpRateLimitingAuthenticator Tests")
 class IdpRateLimitingAuthenticatorTest {
@@ -19,7 +19,7 @@ class IdpRateLimitingAuthenticatorTest {
 
     @BeforeEach
     void setup() {
-        authenticator = IdpRateLimitingAuthenticator.SINGLETON;
+        authenticator = new IdpRateLimitingAuthenticator();
     }
 
     @Nested
