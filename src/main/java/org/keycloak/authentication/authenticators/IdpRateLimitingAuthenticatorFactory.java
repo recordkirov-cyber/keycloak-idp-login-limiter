@@ -1,4 +1,4 @@
-package org.keycloak.authentication.authenticators.conditional;
+package org.keycloak.authentication.authenticators;
 
 import org.keycloak.Config;
 import org.keycloak.authentication.AuthenticatorFactory;
@@ -12,8 +12,24 @@ import java.util.List;
 import static org.keycloak.provider.ProviderConfigProperty.INTEGER_TYPE;
 import static org.keycloak.provider.ProviderConfigProperty.STRING_TYPE;
 
+/**
+ * Factory class for creating IdP rate limiting authenticator instances.
+ *
+ * Фабричный класс для создания экземпляров аутентификатора ограничения входов через IdP.
+ *
+ * This factory registers the authenticator with Keycloak and provides
+ * configuration properties for the admin console.
+ *
+ * Эта фабрика регистрирует аутентификатор в Keycloak и предоставляет
+ * свойства конфигурации для административной консоли.
+ */
 public class IdpRateLimitingAuthenticatorFactory implements AuthenticatorFactory {
 
+    /**
+     * Unique provider identifier for this authenticator
+     *
+     * Уникальный идентификатор провайдера для этого аутентификатора
+     */
     public static final String PROVIDER_ID = "idp-rate-limiting";
 
     static final String CONF_IDP_LIMIT = "idp-limit";
@@ -72,12 +88,23 @@ public class IdpRateLimitingAuthenticatorFactory implements AuthenticatorFactory
         return false;
     }
 
+    /**
+     * Returns help text for this authenticator.
+     *
+     * Возвращает текст справки для этого аутентификатора.
+     *
+     * @return bilingual help text / двуязычный текст справки
+     */
     @Override
     public String getHelpText() {
         return "Blocks authentication if the user exceeds the authentication limit for a specific identity provider within the configured time interval. "
                 + "The counter is automatically reset after the specified number of hours. "
                 + "Use this authenticator to prevent brute-force attacks or limit usage per identity provider. "
-                + "Supports both per-IdP limits and global limits across all identity providers.";
+                + "Supports both per-IdP limits and global limits across all identity providers.\n\n"
+                + "Блокирует аутентификацию, если пользователь превышает лимит аутентификации для определенного провайдера идентификации в течение заданного временного интервала. "
+                + "Счетчик автоматически сбрасывается через указанное количество часов. "
+                + "Используйте этот аутентификатор для предотвращения брутфорс-атак или ограничения использования по провайдерам идентификации. "
+                + "Поддерживает как лимиты по отдельным IdP, так и глобальные лимиты по всем провайдерам идентификации.";
     }
 
     @Override
@@ -111,10 +138,9 @@ public class IdpRateLimitingAuthenticatorFactory implements AuthenticatorFactory
         final ProviderConfigProperty errorMessage = new ProviderConfigProperty();
         errorMessage.setType(STRING_TYPE);
         errorMessage.setName(CONF_ERROR_MESSAGE);
-        errorMessage.setLabel("Error message (optional)");
-        errorMessage.setHelpText("Custom error message to display when rate limit is exceeded. "
-                + "Can be a localization key or plain text. If empty, default error is used. "
-                + "Supports parameters: ${username}, ${idpAlias}, ${limit}, ${resetHours}");
+        errorMessage.setLabel("Error message key (optional)");
+        errorMessage.setHelpText("Custom error message key from the theme messages to display when rate limit is exceeded. "
+                + "If empty, the default key is used.");
         errorMessage.setRequired(false);
 
         return Arrays.asList(idpLimit, idpAlias, resetIntervalHours, errorMessage);
@@ -122,6 +148,6 @@ public class IdpRateLimitingAuthenticatorFactory implements AuthenticatorFactory
 
     @Override
     public org.keycloak.authentication.Authenticator create(org.keycloak.models.KeycloakSession session) {
-        return IdpRateLimitingAuthenticator.SINGLETON;
+        return new IdpRateLimitingAuthenticator();
     }
 }

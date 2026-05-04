@@ -1,4 +1,4 @@
-package org.keycloak.authentication.authenticators.conditional.util;
+package org.keycloak.authentication.authenticators.util;
 
 import jakarta.ws.rs.core.Cookie;
 import jakarta.ws.rs.core.HttpHeaders;

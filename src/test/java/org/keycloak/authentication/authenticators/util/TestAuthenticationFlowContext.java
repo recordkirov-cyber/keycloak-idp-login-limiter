@@ -1,4 +1,4 @@
-package org.keycloak.authentication.authenticators.conditional.util;
+package org.keycloak.authentication.authenticators.util;
 
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
