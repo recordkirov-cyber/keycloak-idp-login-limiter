@@ -200,7 +200,7 @@ class IdpRateLimitingAuthenticatorTest {
             assertTrue(factory.isConfigurable());
             assertFalse(factory.isUserSetupAllowed());
             assertNotNull(factory.getConfigProperties());
-            assertEquals(3, factory.getConfigProperties().size());
+            assertEquals(4, factory.getConfigProperties().size());
         }
 
         @Test

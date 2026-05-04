@@ -9,6 +9,8 @@ import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.sessions.AuthenticationSessionModel;
 
+import jakarta.ws.rs.core.Response;
+
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
@@ -72,7 +74,15 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
 
                 if (limitReached) {
                     LOG.warnf("Rate limit exceeded for user %s via IdP %s", user.getUsername(), effectiveIdpAlias);
-                    context.failure(AuthenticationFlowError.INVALID_CREDENTIALS);
+                    if (config.hasCustomErrorMessage()) {
+                        final String interpolatedMessage = interpolateErrorMessage(config.getErrorMessage(), user.getUsername(), effectiveIdpAlias, config.getIdpLimit(), config.getResetIntervalHours());
+                        final Response errorResponse = Response.status(Response.Status.UNAUTHORIZED)
+                                .entity(interpolatedMessage)
+                                .build();
+                        context.failure(AuthenticationFlowError.INVALID_CREDENTIALS, errorResponse);
+                    } else {
+                        context.failure(AuthenticationFlowError.INVALID_CREDENTIALS);
+                    }
                 } else {
                     context.success();
                 }
@@ -205,6 +215,24 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
         }
         // Sanitize IdP alias for use as attribute key
         return prefix + idpAlias.toLowerCase().replaceAll("[^a-z0-9-_]", "_");
+    }
+
+    /**
+     * Interpolates placeholders in the error message with actual values.
+     *
+     * @param message the error message template
+     * @param username the username
+     * @param idpAlias the IdP alias
+     * @param limit the authentication limit
+     * @param resetHours the reset interval in hours
+     * @return the interpolated message
+     */
+    private String interpolateErrorMessage(String message, String username, String idpAlias, int limit, int resetHours) {
+        return message
+                .replace("${username}", username != null ? username : "")
+                .replace("${idpAlias}", idpAlias != null ? idpAlias : "")
+                .replace("${limit}", String.valueOf(limit))
+                .replace("${resetHours}", String.valueOf(resetHours));
     }
 
     @Override

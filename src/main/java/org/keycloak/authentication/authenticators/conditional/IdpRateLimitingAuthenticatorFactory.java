@@ -19,6 +19,7 @@ public class IdpRateLimitingAuthenticatorFactory implements AuthenticatorFactory
     static final String CONF_IDP_LIMIT = "idp-limit";
     static final String CONF_IDP_ALIAS = "idp-alias";
     static final String CONF_RESET_INTERVAL_HOURS = "reset-interval-hours";
+    static final String CONF_ERROR_MESSAGE = "error-message";
 
     private static final AuthenticationExecutionModel.Requirement[] REQUIREMENT_CHOICES = new AuthenticationExecutionModel.Requirement[]{
             AuthenticationExecutionModel.Requirement.REQUIRED,
@@ -107,7 +108,16 @@ public class IdpRateLimitingAuthenticatorFactory implements AuthenticatorFactory
                 + "Default is 24 hours. For example, setting this to 1 will reset the counter every hour.");
         resetIntervalHours.setRequired(true);
 
-        return Arrays.asList(idpLimit, idpAlias, resetIntervalHours);
+        final ProviderConfigProperty errorMessage = new ProviderConfigProperty();
+        errorMessage.setType(STRING_TYPE);
+        errorMessage.setName(CONF_ERROR_MESSAGE);
+        errorMessage.setLabel("Error message (optional)");
+        errorMessage.setHelpText("Custom error message to display when rate limit is exceeded. "
+                + "Can be a localization key or plain text. If empty, default error is used. "
+                + "Supports parameters: ${username}, ${idpAlias}, ${limit}, ${resetHours}");
+        errorMessage.setRequired(false);
+
+        return Arrays.asList(idpLimit, idpAlias, resetIntervalHours, errorMessage);
     }
 
     @Override
