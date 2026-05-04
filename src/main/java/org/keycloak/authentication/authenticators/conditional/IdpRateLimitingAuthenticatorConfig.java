@@ -7,6 +7,7 @@ import java.util.Map;
 import static org.keycloak.authentication.authenticators.conditional.IdpRateLimitingAuthenticatorFactory.CONF_IDP_ALIAS;
 import static org.keycloak.authentication.authenticators.conditional.IdpRateLimitingAuthenticatorFactory.CONF_IDP_LIMIT;
 import static org.keycloak.authentication.authenticators.conditional.IdpRateLimitingAuthenticatorFactory.CONF_RESET_INTERVAL_HOURS;
+import static org.keycloak.authentication.authenticators.conditional.IdpRateLimitingAuthenticatorFactory.CONF_ERROR_MESSAGE;
 
 /**
  * Configuration class for the IdP rate limiting authenticator.

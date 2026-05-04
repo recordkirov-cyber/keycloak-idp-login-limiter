@@ -9,6 +9,8 @@ import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.sessions.AuthenticationSessionModel;
 
+import jakarta.ws.rs.core.Response;
+
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
@@ -74,7 +76,10 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
                     LOG.warnf("Rate limit exceeded for user %s via IdP %s", user.getUsername(), effectiveIdpAlias);
                     if (config.hasCustomErrorMessage()) {
                         final String interpolatedMessage = interpolateErrorMessage(config.getErrorMessage(), user.getUsername(), effectiveIdpAlias, config.getIdpLimit(), config.getResetIntervalHours());
-                        context.failure(AuthenticationFlowError.INVALID_CREDENTIALS, interpolatedMessage);
+                        final Response errorResponse = Response.status(Response.Status.UNAUTHORIZED)
+                                .entity(interpolatedMessage)
+                                .build();
+                        context.failure(AuthenticationFlowError.INVALID_CREDENTIALS, errorResponse);
                     } else {
                         context.failure(AuthenticationFlowError.INVALID_CREDENTIALS);
                     }
