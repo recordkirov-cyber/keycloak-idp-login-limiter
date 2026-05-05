@@ -19,17 +19,10 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * Identity Provider Rate Limiting Authenticator
  *
- * Аутентификатор ограничения входов через провайдер идентификации
- *
  * This authenticator limits the number of authentication attempts a user can make
  * through a specific Identity Provider (IdP) within a configurable time interval.
  * It tracks authentication attempts using user attributes and blocks further
  * authentication when the configured limit is reached.
- *
- * Этот аутентификатор ограничивает количество попыток аутентификации, которые пользователь
- * может выполнить через определенный провайдер идентификации (IdP) в течение настраиваемого
- * временного интервала. Он отслеживает попытки аутентификации с помощью атрибутов пользователя
- * и блокирует дальнейшую аутентификацию при достижении установленного лимита.
  */
 public class IdpRateLimitingAuthenticator implements Authenticator {
 
@@ -63,15 +56,9 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
     /**
      * Performs authentication with rate limiting based on Identity Provider.
      *
-     * Выполняет аутентификацию с ограничением по провайдеру идентификации.
-     *
      * This method extracts the configuration from the authentication context,
      * validates it, and delegates to the overloaded authenticate method.
      * If configuration fails, authentication is blocked for security.
-     *
-     * Этот метод извлекает конфигурацию из контекста аутентификации,
-     * проверяет её и делегирует выполнение перегруженному методу authenticate.
-     * При ошибке конфигурации аутентификация блокируется в целях безопасности.
      *
      * @param context the authentication flow context / контекст потока аутентификации
      */
@@ -92,15 +79,9 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
     /**
      * Performs authentication with the provided configuration.
      *
-     * Выполняет аутентификацию с предоставленной конфигурацией.
-     *
      * This is the main authentication logic that checks rate limits for the user
      * and specific Identity Provider. It uses thread-safe locking to prevent
      * race conditions and tracks authentication attempts using user attributes.
-     *
-     * Это основная логика аутентификации, которая проверяет лимиты для пользователя
-     * и определенного провайдера идентификации. Использует потокобезопасную блокировку
-     * для предотвращения гонок и отслеживает попытки аутентификации через атрибуты пользователя.
      *
      * @param context the authentication flow context / контекст потока аутентификации
      * @param config the authenticator configuration / конфигурация аутентификатора

@@ -11,12 +11,7 @@ import static org.keycloak.authentication.authenticators.IdpRateLimitingAuthenti
 
 /**
  * Configuration class for the IdP rate limiting authenticator.
- *
- * Класс конфигурации для аутентификатора ограничения входов через IdP.
- *
  * Holds configuration parameters for controlling authentication limits per identity provider.
- *
- * Содержит параметры конфигурации для управления лимитами аутентификации по провайдерам идентификации.
  */
 class IdpRateLimitingAuthenticatorConfig {
 

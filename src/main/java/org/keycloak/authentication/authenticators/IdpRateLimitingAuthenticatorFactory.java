@@ -14,21 +14,13 @@ import static org.keycloak.provider.ProviderConfigProperty.STRING_TYPE;
 
 /**
  * Factory class for creating IdP rate limiting authenticator instances.
- *
- * Фабричный класс для создания экземпляров аутентификатора ограничения входов через IdP.
- *
  * This factory registers the authenticator with Keycloak and provides
  * configuration properties for the admin console.
- *
- * Эта фабрика регистрирует аутентификатор в Keycloak и предоставляет
- * свойства конфигурации для административной консоли.
  */
 public class IdpRateLimitingAuthenticatorFactory implements AuthenticatorFactory {
 
     /**
      * Unique provider identifier for this authenticator
-     *
-     * Уникальный идентификатор провайдера для этого аутентификатора
      */
     public static final String PROVIDER_ID = "idp-rate-limiting";
 
@@ -100,11 +92,7 @@ public class IdpRateLimitingAuthenticatorFactory implements AuthenticatorFactory
         return "Blocks authentication if the user exceeds the authentication limit for a specific identity provider within the configured time interval. "
                 + "The counter is automatically reset after the specified number of hours. "
                 + "Use this authenticator to prevent brute-force attacks or limit usage per identity provider. "
-                + "Supports both per-IdP limits and global limits across all identity providers.\n\n"
-                + "Блокирует аутентификацию, если пользователь превышает лимит аутентификации для определенного провайдера идентификации в течение заданного временного интервала. "
-                + "Счетчик автоматически сбрасывается через указанное количество часов. "
-                + "Используйте этот аутентификатор для предотвращения брутфорс-атак или ограничения использования по провайдерам идентификации. "
-                + "Поддерживает как лимиты по отдельным IdP, так и глобальные лимиты по всем провайдерам идентификации.";
+                + "Supports both per-IdP limits and global limits across all identity providers.";
     }
 
     @Override
