@@ -10,17 +10,18 @@ Custom **Authenticator** for Keycloak that limits the number of authentications 
 
 ## 🔎 Description / Описание
 
-**English:** This authenticator checks the number of login attempts a user makes through a specific IdP and blocks authentication if the limit is exceeded. It runs as part of the authentication flow, ensuring that user attribute changes are properly saved to the database, including production environments with PostgreSQL.
+**English:** This authenticator limits the number of successful logins a user makes through a specific IdP over a configured time interval by counting Keycloak user `LOGIN` events. It does not rely on writing user attributes, so it works with read-only federated users and distributed Keycloak clusters.
 
-**Русский:** Этот аутентификатор проверяет количество попыток входа пользователя через конкретный провайдер IdP и блокирует аутентификацию, если лимит превышен. Он выполняется как часть потока аутентификации, гарантируя, что изменения атрибутов пользователя правильно сохраняются в базе данных, включая продакшн-среды с PostgreSQL.
+**Русский:** Этот аутентификатор ограничивает количество успешных входов пользователя через конкретный IdP за заданный интервал времени, считая события `LOGIN` пользователя в Keycloak. Он не использует запись пользовательских атрибутов, поэтому корректно работает с read-only федерацией и распределённым кластером Keycloak.
 
 ## 🚀 Features / Функциональные возможности
 
 - Limit authentication attempts per IdP / Ограничение количества аутентификаций по IdP
 - Support for global limit (if IdP is not specified) / Поддержка глобального лимита (если IdP не указан)
-- Personal user attributes for storing counters / Персональные пользовательские атрибуты для хранения счётчиков
-- Automatic counter reset by time (interval in hours) / Автоматический сброс счётчика по времени (интервал в часах)
-- Manual counter reset in user admin console / Можно сбросить счётчики вручную в админ-консоли пользователя
+- Event-based rate limiting using `LOGIN` user events / Ограничение на основе событий `LOGIN` пользователя
+- No user attribute writes required / Без записи пользовательских атрибутов
+- Works with read-only federated users and distributed Keycloak clusters / Работает с read-only федерацией и распределённым кластером Keycloak
+- Automatic limit check by recent event history instead of local counters / Автоматическая проверка лимита по истории событий вместо локальных счётчиков
 - Works with Keycloak 22+ and Java 21+ / Работает с Keycloak 22+ и Java 21+
 
 ## 📦 Requirements / Требования
@@ -79,64 +80,46 @@ mvn clean package
 2. The IdP is determined:
    - if `idp-alias` is specified, it is used;
    - otherwise, session notes `BROKER_IDENTITY_PROVIDER` and `IDENTITY_PROVIDER` are checked;
-   - if IdP is not found, the condition is not met.
-3. The time of the last attribute reset is checked.
-4. If more than the specified number of hours have passed, the counter is reset.
-5. The counter is incremented and compared with the limit.
-6. Attributes are updated with the remaining attempts.
+   - if IdP is not found, the check is skipped and authentication proceeds.
+3. The authenticator queries Keycloak user `LOGIN` events for the user in the current realm.
+4. Only events from the last `reset-interval-hours` hours are counted.
+5. If `idp-alias` is configured, only events with `identity_provider` matching that alias are counted; otherwise, all successful `LOGIN` events are counted.
+6. If the event count reaches the configured limit, authentication is blocked.
 
 **Русский:**
 1. Извлекается пользователь из контекста аутентификации.
 2. Определяется IdP:
    - если указан `idp-alias`, используется он;
    - иначе проверяются заметки сессии `BROKER_IDENTITY_PROVIDER` и `IDENTITY_PROVIDER`;
-   - если IdP не найден — условие не выполняется.
-3. Проверяется время последнего сброса атрибута.
-4. Если прошло больше заданного числа часов, счётчик сбрасывается.
-5. Счётчик инкрементируется и сравнивается с лимитом.
-6. Обновляется атрибут оставшихся попыток.
+   - если IdP не найден — проверка пропускается и аутентификация продолжается.
+3. Аутентификатор запрашивает события `LOGIN` пользователя в текущем реалме Keycloak.
+4. Считаются только события за последние `reset-interval-hours` часов.
+5. Если настроен `idp-alias`, учитываются только события с `identity_provider`, совпадающим с алиасом; иначе считаются все успешные `LOGIN` события.
+6. Если число событий достигает лимита, аутентификация блокируется.
 
-## 🧾 User Attributes / Пользовательские атрибуты
+## 📂 Event Requirements / Требования к событиям
 
-**English:** The following attributes are used for each user:
-- `idp_attempts_{alias}` — current number of logins through IdP
-- `idp_last_reset_{alias}` — timestamp of last reset
+**English:** This authenticator relies on Keycloak user `LOGIN` events. Make sure that user events are enabled in the realm settings, and that `LOGIN` events are recorded in the current realm.
 
-If alias is not specified, the `global` suffix is used:
-- `idp_attempts_global`
-- `idp_last_reset_global`
+**Русский:** Аутентификатор зависит от пользовательских событий `LOGIN` в Keycloak. Убедитесь, что пользовательские события включены в настройках реалма и что события `LOGIN` сохраняются в текущем реалме.
 
-**Русский:** Для каждого пользователя используются атрибуты вида:
-- `idp_attempts_{alias}` — текущее число входов через IdP
-- `idp_last_reset_{alias}` — метка времени последнего сброса
+### Keycloak realm settings / Настройки реалма
 
-Если алиас не указан, используется суффикс `global`:
-- `idp_attempts_global`
-- `idp_last_reset_global`
+**English:** In Keycloak admin console, go to `Realm Settings` → `Events` and enable:
+- `Save Events`
+- `Login Events`
+- optionally `Event Listeners` such as `jboss-logging` or custom event listeners
+
+**Русский:** В админ-консоли Keycloak перейдите в `Realm Settings` → `Events` и включите:
+- `Save Events`
+- `Login Events`
+- при необходимости `Event Listeners`, например `jboss-logging` или кастомные слушатели событий
 
 ### Note / Примечание
 
-**English:** Attributes store only the attempt counter and the time of the last reset; remaining attempts are calculated using the formula `limit - attempts`.
+**English:** Since all rate limiting is based on event history, event storage must be available and contain recent `LOGIN` events for the user.
 
-**Русский:** Атрибуты хранят только счётчик попыток и время последнего сброса; оставшиеся попытки вычисляются по формуле `limit - attempts`.
-
-## 🔧 Manual Reset in Admin Console / Сброс в админ-консоли
-
-**English:** An administrator can manually reset user counters by deleting or modifying the corresponding attributes in the user profile.
-
-**Русский:** Администратор может вручную сбросить счётчики у пользователя, удалив или изменив соответствующие атрибуты в профиле пользователя.
-
-### Where to Find / Где искать
-
-**English:** In the Keycloak admin console:
-- `Users` → select user → `Attributes` tab
-- Find `idp_attempts_*`, `idp_last_reset_*`
-- Delete or modify values to reset counters
-
-**Русский:** В админ-консоли Keycloak:
-- `Users` → выберите пользователя → вкладка `Attributes`
-- Найдите `idp_attempts_*`, `idp_last_reset_*`
-- Удалите или измените значения, чтобы сбросить счётчики
+**Русский:** Поскольку ограничение работает на основе истории событий, хранилище событий должно быть доступно и содержать свежие события `LOGIN` для пользователя.
 
 ## 🧪 Testing / Тестирование
 

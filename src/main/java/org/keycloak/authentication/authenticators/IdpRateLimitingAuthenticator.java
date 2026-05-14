@@ -4,6 +4,10 @@ import org.jboss.logging.Logger;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.Authenticator;
+import org.keycloak.events.Details;
+import org.keycloak.events.Event;
+import org.keycloak.events.EventStoreProvider;
+import org.keycloak.events.EventType;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
@@ -11,10 +15,9 @@ import org.keycloak.sessions.AuthenticationSessionModel;
 
 import jakarta.ws.rs.core.Response;
 
+import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Stream;
 
 /**
  * Identity Provider Rate Limiting Authenticator
@@ -35,23 +38,7 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
 
     private static final Logger LOG = Logger.getLogger(IdpRateLimitingAuthenticator.class);
 
-    private static final String ATTEMPTS_ATTRIBUTE_PREFIX = "idp_attempts_";
-    private static final String LAST_RESET_ATTRIBUTE_PREFIX = "idp_last_reset_";
-
-    // Thread-safe lock registry with cleanup mechanism
-    private static final ConcurrentHashMap<String, Lock> userLocks = new ConcurrentHashMap<>();
-
-    // Timestamps for lock cleanup
-    private static final ConcurrentHashMap<String, Long> lockTimestamps = new ConcurrentHashMap<>();
-
-    // Lock cleanup threshold (1 hour)
-    private static final long LOCK_CLEANUP_THRESHOLD = 60 * 60 * 1000L;
-
-    // Last cleanup timestamp
-    private static volatile long lastCleanupTime = System.currentTimeMillis();
-
-    // Cleanup interval (10 minutes)
-    private static final long CLEANUP_INTERVAL = 10 * 60 * 1000L;
+    // No user attributes are required for event-based rate limiting.
 
     /**
      * Performs authentication with rate limiting based on Identity Provider.
@@ -106,44 +93,20 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
             }
 
             final String effectiveIdpAlias = idpAlias.get();
-            LOG.debugf("Checking rate limit for IdP: %s, limit: %d", effectiveIdpAlias, config.getIdpLimit());
+            LOG.debugf("Checking event-based rate limit for user %s, IdP: %s, limit: %d", user.getUsername(), effectiveIdpAlias, config.getIdpLimit());
 
-            // Use proper thread-safe locking mechanism with cleanup tracking
-            final String lockKey = user.getId() + ":" + effectiveIdpAlias;
-            final Lock lock = userLocks.computeIfAbsent(lockKey, k -> new ReentrantLock());
-            lockTimestamps.put(lockKey, System.currentTimeMillis());
+            final boolean limitReached = hasExceededEventBasedLimit(context, user, effectiveIdpAlias,
+                    config.getIdpLimit(), config.getResetIntervalHours());
 
-            // Perform periodic cleanup
-            final long currentTime = System.currentTimeMillis();
-            if (currentTime - lastCleanupTime > CLEANUP_INTERVAL) {
-                synchronized (IdpRateLimitingAuthenticator.class) {
-                    if (currentTime - lastCleanupTime > CLEANUP_INTERVAL) {
-                        cleanupExpiredLocks();
-                        lastCleanupTime = currentTime;
-                    }
-                }
-            }
-
-            lock.lock();
-            try {
-                // Check and reset counter if needed
-                checkAndResetCounter(user, effectiveIdpAlias, config.getResetIntervalHours());
-
-                // Increment counter and check if limit reached
-                final boolean limitReached = incrementAndCheckLimit(user, effectiveIdpAlias, config.getIdpLimit());
-
-                if (limitReached) {
-                    LOG.warnf("Rate limit exceeded for user %s via IdP %s", user.getUsername(), effectiveIdpAlias);
-                    final String errorMessageKey = config.hasCustomErrorMessage()
-                            ? config.getErrorMessage()
-                            : IDP_RATE_LIMIT_EXCEEDED;
-                    Response challenge = context.form().setError(errorMessageKey).createErrorPage(Response.Status.UNAUTHORIZED);
-                    context.failure(AuthenticationFlowError.INVALID_CREDENTIALS, challenge);
-                } else {
-                    context.success();
-                }
-            } finally {
-                lock.unlock();
+            if (limitReached) {
+                LOG.warnf("Rate limit exceeded for user %s via IdP %s", user.getUsername(), effectiveIdpAlias);
+                final String errorMessageKey = config.hasCustomErrorMessage()
+                        ? config.getErrorMessage()
+                        : IDP_RATE_LIMIT_EXCEEDED;
+                Response challenge = context.form().setError(errorMessageKey).createErrorPage(Response.Status.UNAUTHORIZED);
+                context.failure(AuthenticationFlowError.INVALID_CREDENTIALS, challenge);
+            } else {
+                context.success();
             }
         } catch (Exception e) {
             LOG.error("Error checking rate limit condition", e);
@@ -206,72 +169,62 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
         }
     }
 
-    private void checkAndResetCounter(UserModel user, String idpAlias, int resetIntervalHours) {
-        final String lastResetKey = generateAttributeKey(idpAlias, LAST_RESET_ATTRIBUTE_PREFIX);
-        final String attemptsKey = generateAttributeKey(idpAlias, ATTEMPTS_ATTRIBUTE_PREFIX);
+    private boolean hasExceededEventBasedLimit(AuthenticationFlowContext context, UserModel user,
+                                                 String idpAlias, int limit, int resetIntervalHours) {
+        EventStoreProvider eventStore = context.getSession().getProvider(EventStoreProvider.class);
+        if (eventStore == null) {
+            throw new IllegalStateException("EventStoreProvider is not available in the current session");
+        }
 
-        final String lastResetStr = user.getFirstAttribute(lastResetKey);
         final long currentTimeMillis = System.currentTimeMillis();
         final long resetIntervalMillis = (long) resetIntervalHours * 60 * 60 * 1000;
+        final long fromTime = currentTimeMillis - resetIntervalMillis;
 
-        boolean shouldReset = true;
-        if (lastResetStr != null && !lastResetStr.trim().isEmpty()) {
-            try {
-                final long lastResetTimestamp = Long.parseLong(lastResetStr);
-                shouldReset = (currentTimeMillis - lastResetTimestamp) >= resetIntervalMillis;
-            } catch (NumberFormatException e) {
-                LOG.warnf("Invalid last reset timestamp for user %s, key %s: %s",
-                        user.getUsername(), lastResetKey, lastResetStr);
-                shouldReset = true;
-            }
-        }
+        try (Stream<Event> events = eventStore.createQuery()
+                .type(EventType.LOGIN)
+                .realm(context.getRealm().getId())
+                .user(user.getId())
+                .fromDate(fromTime)
+                .toDate(currentTimeMillis)
+                .orderByDescTime()
+                .maxResults(limit + 1)
+                .getResultStream()) {
 
-        if (shouldReset) {
-            user.setSingleAttribute(lastResetKey, String.valueOf(currentTimeMillis));
-            user.setSingleAttribute(attemptsKey, "0");
-            LOG.debugf("Reset counter for user %s, IdP %s after %d hours", user.getUsername(), idpAlias, resetIntervalHours);
+            long count = events
+                    .filter(event -> isSuccessfulIdpLoginEvent(event, idpAlias))
+                    .count();
+
+            LOG.debugf("Found %d successful IdP login events for user %s, IdP %s in the last %d hours",
+                    count, user.getUsername(), idpAlias, resetIntervalHours);
+            return count >= limit;
         }
     }
 
-    // Returns true if limit is reached after incrementing
-    private boolean incrementAndCheckLimit(UserModel user, String idpAlias, int limit) {
-        final String attemptsKey = generateAttributeKey(idpAlias, ATTEMPTS_ATTRIBUTE_PREFIX);
-        final int currentAttempts = getCurrentAttemptCount(user, attemptsKey);
-        final int newAttempts = currentAttempts + 1;
-
-        user.setSingleAttribute(attemptsKey, String.valueOf(newAttempts));
-        LOG.debugf("Incremented attempts for user %s, IdP %s: %d/%d",
-                user.getUsername(), idpAlias, newAttempts, limit);
-
-        return newAttempts >= limit;
-    }
-
-    /**
-     * Gets the current attempt count from user attributes, handling parsing errors gracefully.
-     *
-     * @param user the user model
-     * @param attemptsKey the attribute key for attempts
-     * @return the current attempt count (0 if not found or invalid)
-     */
-    private int getCurrentAttemptCount(UserModel user, String attemptsKey) {
-        String currentAttemptsStr = user.getFirstAttribute(attemptsKey);
-        if (currentAttemptsStr != null && !currentAttemptsStr.trim().isEmpty()) {
-            try {
-                return Integer.parseInt(currentAttemptsStr);
-            } catch (NumberFormatException e) {
-                LOG.warnf("Invalid attempts count for user %s, key %s: %s",
-                        user.getUsername(), attemptsKey, currentAttemptsStr);
-            }
+    private boolean isSuccessfulIdpLoginEvent(Event event, String idpAlias) {
+        if (event == null) {
+            return false;
         }
-        return 0;
-    }
 
-    private String generateAttributeKey(String idpAlias, String prefix) {
-        if (idpAlias == null || idpAlias.trim().isEmpty()) {
-            return prefix + "global";
+        if (event.getError() != null && !event.getError().trim().isEmpty()) {
+            return false;
         }
-        // Sanitize IdP alias for use as attribute key
-        return prefix + idpAlias.toLowerCase().replaceAll("[^a-z0-9-_]", "_");
+
+        Map<String, String> details = event.getDetails();
+        if (details == null) {
+            return false;
+        }
+
+        String eventIdentityProvider = details.get(Details.IDENTITY_PROVIDER);
+        if (eventIdentityProvider == null || eventIdentityProvider.trim().isEmpty()) {
+            return false;
+        }
+
+        String normalizedIdpAlias = idpAlias == null ? "" : idpAlias.trim();
+        if (normalizedIdpAlias.isEmpty()) {
+            return true;
+        }
+
+        return normalizedIdpAlias.equalsIgnoreCase(eventIdentityProvider.trim());
     }
 
     @Override
@@ -296,32 +249,6 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
 
     @Override
     public void close() {
-        // Perform periodic lock cleanup to prevent memory leaks
-        cleanupExpiredLocks();
-    }
-
-    /**
-     * Cleans up expired locks to prevent memory leaks.
-     * This method removes locks that haven't been accessed for LOCK_CLEANUP_THRESHOLD milliseconds.
-     */
-    private static void cleanupExpiredLocks() {
-        final long currentTime = System.currentTimeMillis();
-        final long threshold = LOCK_CLEANUP_THRESHOLD;
-
-        // Create a list of keys to remove to avoid ConcurrentModificationException
-        final java.util.List<String> keysToRemove = new java.util.ArrayList<>();
-        for (java.util.Map.Entry<String, Long> entry : lockTimestamps.entrySet()) {
-            if (currentTime - entry.getValue() > threshold) {
-                keysToRemove.add(entry.getKey());
-            }
-        }
-
-        // Remove the expired entries
-        for (String key : keysToRemove) {
-            lockTimestamps.remove(key);
-            userLocks.remove(key);
-        }
-
-        LOG.debugf("Cleaned up %d expired locks", keysToRemove.size());
+        // No cleanup required for event-based rate limiting.
     }
 }
