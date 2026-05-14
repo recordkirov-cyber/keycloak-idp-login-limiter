@@ -22,6 +22,7 @@ import org.keycloak.models.AuthenticatorConfigModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.sessions.AuthenticationSessionModel;
 import java.net.URI;
 import java.util.Collections;
 import java.util.Date;
@@ -500,6 +501,9 @@ class IdpRateLimitingAuthenticatorTest {
                     CONF_IDP_ALIAS, "",
                     CONF_RESET_INTERVAL_HOURS, "24"
             ));
+            AuthenticationSessionModel authSession = mock(AuthenticationSessionModel.class);
+            when(authSession.getAuthNote("BROKER_IDENTITY_PROVIDER")).thenReturn("google");
+
             when(context.getAuthenticatorConfig()).thenReturn(authConfig);
             when(context.getUser()).thenReturn(user);
             when(user.getId()).thenReturn("user-1");
@@ -507,6 +511,7 @@ class IdpRateLimitingAuthenticatorTest {
             when(context.getRealm()).thenReturn(realm);
             when(realm.getId()).thenReturn("realm-1");
             when(context.getSession()).thenReturn(session);
+            when(context.getAuthenticationSession()).thenReturn(authSession);
             when(eventStore.createQuery()).thenReturn(query);
             when(query.type(EventType.LOGIN)).thenReturn(query);
             when(query.realm(anyString())).thenReturn(query);

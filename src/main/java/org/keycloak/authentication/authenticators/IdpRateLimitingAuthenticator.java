@@ -121,26 +121,31 @@ public class IdpRateLimitingAuthenticator implements Authenticator {
             return Optional.of(config.getIdpAlias());
         }
 
-        // Try to get from broker context (when authenticating through broker)
-        Optional<String> brokerIdp = getBrokerIdentityProviderAlias(context);
-        if (brokerIdp.isPresent()) {
-            return brokerIdp;
-        }
-
-        // Try to get from authentication session note (for subsequent authentications)
-        AuthenticationSessionModel authSession = context.getAuthenticationSession();
-        if (authSession != null) {
-            // Check primary note names
-            String[] noteKeys = {"BROKER_IDENTITY_PROVIDER", "IDENTITY_PROVIDER"};
-            for (String noteKey : noteKeys) {
-                String idpFromNote = authSession.getAuthNote(noteKey);
-                if (idpFromNote != null && !idpFromNote.trim().isEmpty()) {
-                    return Optional.of(idpFromNote);
-                }
-            }
+        // For global limits, the authenticator still needs to verify that this is an IdP
+        // / broker login. When an IdP alias is present in the authentication session,
+        // proceed with an empty alias so that all successful LOGIN events are counted.
+        if (isBrokerOrIdpSession(context)) {
+            return Optional.of("");
         }
 
         return Optional.empty();
+    }
+
+    private boolean isBrokerOrIdpSession(AuthenticationFlowContext context) {
+        AuthenticationSessionModel authSession = context.getAuthenticationSession();
+        if (authSession == null) {
+            return false;
+        }
+
+        String[] noteKeys = {"BROKER_IDENTITY_PROVIDER", "IDENTITY_PROVIDER"};
+        for (String noteKey : noteKeys) {
+            String idpFromNote = authSession.getAuthNote(noteKey);
+            if (idpFromNote != null && !idpFromNote.trim().isEmpty()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private Optional<String> getBrokerIdentityProviderAlias(AuthenticationFlowContext context) {
